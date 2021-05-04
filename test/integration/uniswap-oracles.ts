@@ -6,7 +6,6 @@ import cap from "chai-as-promised";
 import { bigNumberToDecmal } from "../../utils/Helpers";
 import { UniswapPairOracle } from "../../typechain/UniswapPairOracle";
 
-import { deployUniswapOracle } from "../../deploy_manual/manual_deploy_uniswap_price_feeds"
 import { BDXShares } from "../../typechain/BDXShares";
 import { BDStable } from "../../typechain/BDStable";
 import * as constants from '../../utils/Constatnts'
@@ -16,6 +15,7 @@ import { UniswapV2Router02 } from "../../typechain/UniswapV2Router02";
 import { WETH } from "../../typechain/WETH";
 import { UniswapV2Factory } from "../../typechain/UniswapV2Factory";
 import { UniswapV2Pair } from "../../typechain/UniswapV2Pair";
+import { pathToFileURL } from "node:url";
 
 chai.use(cap);
 
@@ -64,7 +64,7 @@ async function getPrices(bdStableName: string) {
     return [wethInBdStablePriceDecimal, bdStableInWethPriceDecimal];
 }
 
-async function updatePair(tokenName: string){
+async function getWethPair(tokenName: string): Promise<UniswapV2Pair> {
     const ownerUser = (await hre.getNamedAccounts()).DEPLOYER_ADDRESS
     const uniswapFactory = await hre.ethers.getContract("UniswapV2Factory", ownerUser) as unknown as UniswapV2Factory;
 
@@ -74,92 +74,62 @@ async function updatePair(tokenName: string){
 
     const pair = await hre.ethers.getContractAt("UniswapV2Pair", pairAddress) as unknown as UniswapV2Pair;
 
+    return pair;
+}
+
+async function updatePair(tokenName: string){
+    var pair = await getWethPair(tokenName);
+
     await pair.updateOracle();
 }
 
-describe("Uniswap Oracles", async () => {
-    before(async () => {
+describe("Uniswap Oracles", () => {
+
+    beforeEach(async () => {
         await hre.deployments.fixture();
     });
 
-    const poolCreatorUser = await hre.ethers.getNamedSigner('POOL_CREATOR');
-    const ownerUser = (await hre.getNamedAccounts()).DEPLOYER_ADDRESS
+    const oneHour = 60*60;
 
-    it("should get weth/bdeur price", async () => {
+    it("should add bdeur oracle", async () => {
         const bdeur = await hre.ethers.getContract("BDEUR") as unknown as BDStable;
 
         const testUser1 = await hre.ethers.getNamedSigner('TEST1');
         
         await provideLiquidity_WETH_BDEUR(hre, 20, 80, testUser1);
+        await simulateTimeElapseInSeconds(oneHour);
 
-        await deployUniswapOracle(hre, bdeur.address, "BDEUR");
-        const bdeurWethOracle = await hre.ethers.getContract("UniswapPairOracle_BDEUR_WETH") as unknown as UniswapPairOracle;
+        const bdeurWethOracle = await getWethPair("BDEUR");
         
         bdeur.setBDStable_WETH_Oracle(bdeurWethOracle.address);
-        
-        console.log(`Added BDEUR WETH Uniswap oracle`);
 
-        const oracle = await hre.ethers.getContract(
-            'UniswapPairOracle_BDEUR_WETH', 
-            poolCreatorUser) as unknown as UniswapPairOracle;
-
-        await simulateTimeElapseInDays(1);
-        await oracle.update();
-        
-        const wethBdeurPrice = await oracle.consult(constants.wETH_address, toErc20(1));
-        const bdeurWethPrice = await oracle.consult(bdeur.address, toErc20(1));
-        
-        const wethBdeurPriceDecimal = bigNumberToDecmal(wethBdeurPrice, 18);
-        const bdeurWethPriceDecimal = bigNumberToDecmal(bdeurWethPrice, 18);
-
-        console.log("WETH/BDEUR price: " + wethBdeurPriceDecimal);
-        console.log("BDEUR/WETH price: " + bdeurWethPriceDecimal);
-
-        expect(wethBdeurPriceDecimal).to.be.eq(4);
-        expect(bdeurWethPriceDecimal).to.be.eq(0.25);
+        await swapWethFor("BDEUR", 5);
+        await updatePair("BDEUR");
+        const [wethInBdStablePriceDecimal1, bdStableInWethPriceDecimal1] = await getPrices("BDEUR");
     });
 
-    it("should get weth/bdx price", async () => {
+    it("should add bdx oracle", async () => {
         const bdeur = await hre.ethers.getContract("BDEUR") as unknown as BDStable;
-        const bdx = await hre.ethers.getContract("BDXShares") as unknown as BDXShares;
 
         const testUser1 = await hre.ethers.getNamedSigner('TEST1');
         
         await provideLiquidity_BDX_WETH(hre, 20, 80, testUser1);
 
-        await deployUniswapOracle(hre, bdx.address, "BDX");
-        const bdxWethOracle = await hre.ethers.getContract("UniswapPairOracle_BDX_WETH") as unknown as UniswapPairOracle;
+        const bdxWethOracle = await getWethPair("BDXShares");
         
-        bdeur.setBDStable_WETH_Oracle(bdxWethOracle.address);
-        
-        console.log(`Added BDX WETH Uniswap oracle`);
+        bdeur.setBDX_WETH_Oracle(bdxWethOracle.address);
 
-        const oracle = await hre.ethers.getContract(
-            'UniswapPairOracle_BDX_WETH', 
-            poolCreatorUser) as unknown as UniswapPairOracle;
-
-        await simulateTimeElapseInDays(1);
-        await oracle.update();
-        
-        const wethBdxPrice = await oracle.consult(constants.wETH_address, toErc20(1));
-        const bdxWethPrice = await oracle.consult(bdx.address, toErc20(1));
-        
-        const wethBdxPriceDecimal = bigNumberToDecmal(wethBdxPrice, 18);
-        const bdxWethPriceDecimal = bigNumberToDecmal(bdxWethPrice, 18);
-
-        console.log("WETH/BDX price: " + wethBdxPriceDecimal);
-        console.log("BDX/WETH price: " + bdxWethPriceDecimal);
-
-        expect(wethBdxPriceDecimal).to.be.eq(4);
-        expect(bdxWethPriceDecimal).to.be.eq(0.25);
+        await swapWethFor("BDXShares", 5);
+        await updatePair("BDXShares");
+        const [wethInBdxPriceDecimal1, bdxInWethPriceDecimal1] = await getPrices("BDXShares");
     })
 
     it("should update price after swap", async () => {
-
         const testUserLiquidityProvider = await hre.ethers.getNamedSigner('TEST1');
 
         await provideLiquidity_WETH_BDEUR(hre, 20, 80, testUserLiquidityProvider);
-        await simulateTimeElapseInDays(1);
+        
+        await simulateTimeElapseInSeconds(oneHour);
 
         await swapWethFor("BDEUR", 5);
         const [wethInBdStablePriceDecimal1, bdStableInWethPriceDecimal1] = await getPrices("BDEUR");
@@ -168,7 +138,7 @@ describe("Uniswap Oracles", async () => {
         expect(wethInBdStablePriceDecimal1).to.be.eq(4);
         expect(bdStableInWethPriceDecimal1).to.be.eq(0.25);
 
-        await simulateTimeElapseInDays(1);
+        await simulateTimeElapseInSeconds(oneHour);
 
         await swapWethFor("BDEUR", 1);
         const [wethInBdStablePriceDecimal2, bdStableInWethPriceDecimal2]  = await getPrices("BDEUR");
@@ -177,12 +147,11 @@ describe("Uniswap Oracles", async () => {
         expect(bdStableInWethPriceDecimal2).to.be.gt(bdStableInWethPriceDecimal1);
     });
 
-    it.only("should not update price before one hour elapses", async () => {
-
+    it("should not update price before one hour elapses", async () => {
         const testUserLiquidityProvider = await hre.ethers.getNamedSigner('TEST1');
 
         await provideLiquidity_WETH_BDEUR(hre, 20, 80, testUserLiquidityProvider);
-        await simulateTimeElapseInSeconds(60*60+1);
+        await simulateTimeElapseInSeconds(oneHour);
 
         await swapWethFor("BDEUR", 5);
         const [wethInBdStablePriceDecimal1, bdStableInWethPriceDecimal1] = await getPrices("BDEUR");
@@ -195,10 +164,9 @@ describe("Uniswap Oracles", async () => {
         expect(wethInBdStablePriceDecimal2).to.be.eq(wethInBdStablePriceDecimal1);
         expect(bdStableInWethPriceDecimal2).to.be.eq(bdStableInWethPriceDecimal1);
 
-        await simulateTimeElapseInSeconds(60*60+1);
+        await simulateTimeElapseInSeconds(oneHour);
 
         await updatePair("BDEUR");
-        await swapWethFor("BDEUR", 1);
         const [wethInBdStablePriceDecimal3, bdStableInWethPriceDecimal3] = await getPrices("BDEUR");
 
         expect(wethInBdStablePriceDecimal3).to.be.lt(wethInBdStablePriceDecimal1);

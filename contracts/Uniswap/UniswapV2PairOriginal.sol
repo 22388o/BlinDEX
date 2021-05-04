@@ -32,9 +32,9 @@ contract UniswapV2PairOriginal is IUniswapV2Pair {
     address public override token0;
     address public override token1;
 
-    uint112 private reserve0;           // uses single storage slot, accessible via getReserves
-    uint112 private reserve1;           // uses single storage slot, accessible via getReserves
-    uint32  private blockTimestampLast; // uses single storage slot, accessible via getReserves
+    uint112 internal reserve0;           // uses single storage slot, accessible via getReserves
+    uint112 internal reserve1;           // uses single storage slot, accessible via getReserves
+    uint32  internal blockTimestampLast; // uses single storage slot, accessible via getReserves
 
     uint public override price0CumulativeLast;
     uint public override price1CumulativeLast;
