@@ -10,10 +10,13 @@ import '../Math/FixedPoint.sol';
 import '../ERC20/IERC20.sol';
 import './Interfaces/IUniswapV2Factory.sol';
 import './Interfaces/IUniswapV2Callee.sol';
+import './Interfaces/IUniswapV2PairOracle.sol';
 import './UniswapV2OracleLibrary.sol';
 import './UniswapV2PairOriginal.sol';
 
-contract UniswapV2Pair is UniswapV2PairOriginal {
+import "hardhat/console.sol";
+
+contract UniswapV2Pair is UniswapV2PairOriginal, IUniswapV2PairOracle {
     using FixedPoint for *;
     using SafeMath  for uint;
     using UQ112x112 for uint224;
@@ -30,8 +33,8 @@ contract UniswapV2Pair is UniswapV2PairOriginal {
     address owner_address;
     address timelock_address;
 
-    constructor() UniswapV2PairOriginal() public {
-        owner_address = address(0); // todo ag owner is needed
+    constructor(address _owner_address) UniswapV2PairOriginal() public {
+        owner_address = _owner_address;
     }
 
     // update reserves and, on the first call per block, price accumulators
@@ -39,6 +42,10 @@ contract UniswapV2Pair is UniswapV2PairOriginal {
         super._update(balance0, balance1, _reserve0, _reserve1);
 
         updateOracle();   
+    }
+
+    function setOwner_sddress(address _owner_address) external onlyByOwnerOrGovernance {
+        owner_address = _owner_address;
     }
 
     function setPeriod(uint _period) external onlyByOwnerOrGovernance {
@@ -53,12 +60,18 @@ contract UniswapV2Pair is UniswapV2PairOriginal {
         ALLOW_STALE_CONSULTS = _allow_stale_consults;
     }
 
-    function updateOracle() internal {
+    function updateOracle() public {
         uint32 blockTimestamp = UniswapV2OracleLibrary.currentBlockTimestamp();
         uint32 timeElapsed = blockTimestamp - blockTimestampLastOracle; // Overflow is desired
         if(timeElapsed >= PERIOD) {
             price0AverageOracle = FixedPoint.uq112x112(uint224((price0CumulativeLast - price0CumulativeLastOracle) / timeElapsed));
             price1AverageOracle = FixedPoint.uq112x112(uint224((price1CumulativeLast - price1CumulativeLastOracle) / timeElapsed));
+
+            console.log("------------------------");
+            console.log(price1AverageOracle.decode());
+            console.log(price1CumulativeLast);
+            console.log(price1CumulativeLastOracle);
+            console.log(timeElapsed);
 
             price0CumulativeLastOracle = price0CumulativeLast;
             price1CumulativeLastOracle = price1CumulativeLast;
@@ -67,7 +80,7 @@ contract UniswapV2Pair is UniswapV2PairOriginal {
     }
 
     // Note this will always return 0 before update has been called successfully for the first time.
-    function consult(address token, uint amountIn) external view returns (uint amountOut) {
+    function consult(address token, uint amountIn) external view override returns (uint amountOut) {
         
         uint32 blockTimestamp = UniswapV2OracleLibrary.currentBlockTimestamp();
         uint32 timeElapsed = blockTimestamp - blockTimestampLastOracle; // Overflow is desired
@@ -79,7 +92,7 @@ contract UniswapV2Pair is UniswapV2PairOriginal {
             amountOut = price0AverageOracle.mul(amountIn).decode144();
         } else {
             require(token == token1, 'UniswapPairOracle: INVALID_TOKEN');
-            amountOut = price0AverageOracle.mul(amountIn).decode144();
+            amountOut = price1AverageOracle.mul(amountIn).decode144();
         }
     }
 
